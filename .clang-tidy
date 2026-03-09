@@ -1,0 +1,82 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+
+WarningsAsErrors: ''
+
+HeaderFileExtensions:
+  - ''
+  - h
+  - hpp
+
+ImplementationFileExtensions:
+  - cpp
+
+HeaderFilterRegex: '(common|mainboard|voiceboard)/.*'
+
+ExcludeHeaderFilterRegex: 'subprojects/.*'
+
+FormatStyle: file
+
+CheckOptions:
+  # Naming conventions matching project style
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: UPPER_CASE
+  readability-identifier-naming.FunctionCase: lower_case
+  readability-identifier-naming.MethodCase: lower_case
+  readability-identifier-naming.MemberCase: lower_case
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.ConstexprVariableCase: lower_case
+  readability-identifier-naming.GlobalConstantCase: lower_case
+  readability-identifier-naming.StaticConstantCase: lower_case
+  readability-identifier-naming.TemplateParameterCase: CamelCase
+
+  # Allow public members in structs (data-oriented design)
+  cppcoreguidelines-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: 'true'
+
+  # Embedded-appropriate settings
+  bugprone-narrowing-conversions.WarnOnIntegerNarrowingConversion: 'true'
+  bugprone-narrowing-conversions.WarnOnFloatingPointNarrowingConversion: 'true'
+  bugprone-suspicious-include.HeaderFileExtensions: ';h;hpp'
+  bugprone-suspicious-include.ImplementationFileExtensions: 'c;cpp'
+
+  # CERT settings
+  cert-dcl16-c.NewSuffixes: 'L;LL;LU;LLU;U;UL;ULL'
+  cert-err33-c.AllowCastToVoid: 'true'
+
+  # Modernize settings (C++23)
+  modernize-use-auto.MinTypeNameLength: '5'
+  modernize-use-nullptr.NullMacros: 'NULL'
+  modernize-loop-convert.MinConfidence: 'reasonable'
+  modernize-pass-by-value.IncludeStyle: 'llvm'
+
+  # Performance settings
+  performance-move-const-arg.CheckTriviallyCopyableMove: 'true'
+  performance-unnecessary-value-param.IncludeStyle: 'llvm'
+
+  # Readability settings
+  readability-braces-around-statements.ShortStatementLines: '0'
+  readability-implicit-bool-conversion.AllowIntegerConditions: 'false'
+  readability-implicit-bool-conversion.AllowPointerConditions: 'true'
+  readability-simplify-boolean-expr.ChainedConditionalReturn: 'true'
+  readability-simplify-boolean-expr.ChainedConditionalAssignment: 'true'
+
+  # Misc settings
+  misc-const-correctness.AnalyzeValues: 'true'
+  misc-const-correctness.AnalyzeReferences: 'true'
+  misc-const-correctness.WarnPointersAsValues: 'false'
+
+SystemHeaders: false
+...
