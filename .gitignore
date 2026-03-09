@@ -42,3 +42,5 @@
 
 .cache/
 build/
+/subprojects/*
+!/subprojects/ut.wrap
