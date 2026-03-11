@@ -20,7 +20,7 @@ HeaderFileExtensions:
 ImplementationFileExtensions:
   - cpp
 
-HeaderFilterRegex: '(common|mainboard|voiceboard)/.*'
+HeaderFilterRegex: 'include/.*'
 
 ExcludeHeaderFilterRegex: 'subprojects/.*'
 
@@ -31,10 +31,13 @@ CheckOptions:
   readability-identifier-naming.ClassCase: CamelCase
   readability-identifier-naming.StructCase: CamelCase
   readability-identifier-naming.EnumCase: CamelCase
-  readability-identifier-naming.EnumConstantCase: UPPER_CASE
+  readability-identifier-naming.EnumConstantCase: CamelCase
   readability-identifier-naming.FunctionCase: lower_case
   readability-identifier-naming.MethodCase: lower_case
   readability-identifier-naming.MemberCase: lower_case
+  readability-identifier-naming.ClassMemberCase: lower_case
+  readability-identifier-naming.PrivateMemberCase: lower_case
+  readability-identifier-naming.PrivateMemberSuffix: _
   readability-identifier-naming.VariableCase: lower_case
   readability-identifier-naming.ParameterCase: lower_case
   readability-identifier-naming.NamespaceCase: lower_case
@@ -42,6 +45,8 @@ CheckOptions:
   readability-identifier-naming.GlobalConstantCase: lower_case
   readability-identifier-naming.StaticConstantCase: lower_case
   readability-identifier-naming.TemplateParameterCase: CamelCase
+  readability-identifier-length.MinimumVariableNameLength: 2
+  readability-identifier-length.MinimumLoopCounterLength: 1
 
   # Allow public members in structs (data-oriented design)
   cppcoreguidelines-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic: 'true'
