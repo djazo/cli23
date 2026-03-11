@@ -1,0 +1,482 @@
+= cli23
+:toc: left
+:toc-title: Contents
+:toclevels: 3
+:source-highlighter: highlight.js
+:icons: font
+:cpp: C++
+
+A header-only {cpp}23 command-line option parser.
+Single include, no runtime dependencies, error handling via `std::expected`.
+
+== Quick start
+
+[source,cpp]
+----
+#include <cli/cli.hpp>
+
+int main(int argc, char *argv[]) {
+    cli::Parser parser("my-app", "Does something useful.");
+
+    parser.option<std::string>("--output").alias("-o").help("Output file").required();
+    parser.option<int>("--jobs").alias("-j").help("Worker threads").default_value(4);
+    parser.flag("--verbose").alias("-v").help("Enable verbose output");
+
+    auto result = parser.parse_or_exit(argc, argv);
+
+    auto output  = result.get<std::string>("--output");
+    auto jobs    = result.get<int>("--jobs");
+    bool verbose = result.get<bool>("--verbose");
+
+    for (auto const &file : result.positional()) {
+        // handle positional arguments
+    }
+}
+----
+
+Produced help (`--help` wiring is left to the caller):
+
+----
+Usage: my-app [options]
+
+Does something useful.
+
+Options:
+  --output, -o <string>         Output file (required)
+  --jobs, -j <int>              Worker threads [default: 4]
+  --verbose, -v                 Enable verbose output
+----
+
+== Integration
+
+=== Meson (subproject)
+
+Copy or wrap `include/cli/` into your project and declare the dependency:
+
+[source,meson]
+----
+cli23_dep = declare_dependency(
+  include_directories : include_directories('path/to/cli23/include'),
+)
+----
+
+=== Compiler requirements
+
+[cols="1,1,1", options="header"]
+|===
+| Feature used | GCC | Clang
+
+| `std::expected`      | 12  | 16
+| `std::print`         | 14  | 18 (libc++ 18)
+| `std::from_chars`    | 11  | 14
+| `std::span`          | 10  | 10
+| Concepts             | 10  | 10
+|===
+
+Compile with `-std=c++23`.
+
+NOTE: `std::from_chars` for floating-point types requires macOS 26+ SDK.
+On earlier Apple SDKs the library falls back to `std::stod`.
+
+== Argument syntax
+
+The parser understands the following token forms on the command line:
+
+[cols="1,2", options="header"]
+|===
+| Form | Example
+
+| Long option with separate value  | `--output file.txt`
+| Long option with inline value    | `--output=file.txt`
+| Short option with separate value | `-o file.txt`
+| Short option with inline value   | `-o=file.txt`
+| Boolean flag                     | `--verbose`
+| Bare `-`                         | treated as a positional argument
+| `--` separator                   | everything after is positional
+|===
+
+Positional arguments are collected in order of appearance, interleaved with
+option tokens freely:
+
+----
+my-app input.txt --verbose output.txt
+# positional: ["input.txt", "output.txt"]
+----
+
+== API reference
+
+=== `cli::Parser`
+
+[source,cpp]
+----
+namespace cli {
+class Parser;
+}
+----
+
+The central class. Construct one, register options, then call `parse`.
+
+==== Constructor
+
+[source,cpp]
+----
+explicit Parser(std::string name, std::string description = "");
+----
+
+[cols="1,3", options="header"]
+|===
+| Parameter | Description
+
+| `name`        | Program name shown in usage and error messages.
+| `description` | Optional one-line description shown below the usage line.
+|===
+
+==== `option<T>`
+
+[source,cpp]
+----
+template <Parseable T>
+auto option(std::string name) -> OptionBuilder<T>;
+----
+
+Registers an option that consumes the next token as its value.
+Returns an `OptionBuilder<T>` for further configuration (see <<optionbuilder>>).
+
+`T` must satisfy the `Parseable` concept — one of:
+`bool`, `int`, `long`, `float`, `double`, `std::string`.
+
+[source,cpp]
+----
+parser.option<int>("--count").alias("-n").help("Count").default_value(0);
+----
+
+==== `flag`
+
+[source,cpp]
+----
+auto flag(std::string name) -> OptionBuilder<bool>;
+----
+
+Registers a boolean flag. The flag is `false` by default and becomes `true`
+when present on the command line. No value token is consumed.
+
+[source,cpp]
+----
+parser.flag("--verbose").alias("-v").help("Verbose output");
+----
+
+==== `parse` (span overload)
+
+[source,cpp]
+----
+[[nodiscard]]
+auto parse(std::span<char *const> args)
+    -> std::expected<ParseResult, ParseError>;
+----
+
+Primary parsing entry point. `args` must **not** include `argv[0]` (the
+program name) — pass only the actual arguments.
+
+Returns a `ParseResult` on success, or a `ParseError` describing the first
+failure encountered.
+
+==== `parse` (argc/argv overload)
+
+[source,cpp]
+----
+[[nodiscard]]
+auto parse(int argc, char *argv[])
+    -> std::expected<ParseResult, ParseError>;
+----
+
+Convenience wrapper for `main`'s `argc`/`argv`. Internally calls
+`parse(span.subspan(1))` to skip `argv[0]`.
+
+==== `parse_or_exit`
+
+[source,cpp]
+----
+[[nodiscard]]
+auto parse_or_exit(int argc, char *argv[]) -> ParseResult;
+----
+
+Calls `parse` and, on failure, prints the error to `stderr` and calls
+`std::exit(1)`. Suitable for programs that treat parse errors as fatal.
+
+----
+error: required option '--output' not provided
+Try 'my-app --help' for usage.
+----
+
+==== `print_help`
+
+[source,cpp]
+----
+void print_help() const;
+----
+
+Prints a formatted help block to `stdout`. Options are aligned at column 30.
+Default values and `(required)` markers are appended automatically.
+
+---
+
+=== `OptionBuilder<T>`
+
+Returned by `Parser::option<T>()` and `Parser::flag()`.
+All methods return `*this` to allow chaining.
+
+[source,cpp]
+----
+parser.option<std::string>("--file")
+      .alias("-f")
+      .help("Input file")
+      .required();
+----
+
+==== `alias`
+
+[source,cpp]
+----
+auto alias(std::string name) -> OptionBuilder &;
+----
+
+Adds an alternative name (typically a short form). Can be called multiple
+times to add more than one alias.
+
+==== `help`
+
+[source,cpp]
+----
+auto help(std::string text) -> OptionBuilder &;
+----
+
+Sets the help string displayed by `print_help`.
+
+==== `required`
+
+[source,cpp]
+----
+auto required() -> OptionBuilder &;
+----
+
+Marks the option as required. `parse` returns a `MissingRequired` error if
+the option is absent and has no default value.
+
+==== `default_value`
+
+[source,cpp]
+----
+auto default_value(T val) -> OptionBuilder &;
+// Not available for OptionBuilder<bool> (flags always default to false).
+----
+
+Sets the value used when the option is not present on the command line.
+
+---
+
+=== `cli::ParseResult`
+
+Returned by a successful `parse`. Holds the resolved option values and the
+list of positional arguments.
+
+==== `get<T>`
+
+[source,cpp]
+----
+template <Parseable T>
+[[nodiscard]] auto get(std::string_view name) -> T;
+----
+
+Returns the value of the named option as type `T`.
+Throws `std::out_of_range` if the option is not present (i.e. it had no
+default and was not provided on the command line).
+
+[source,cpp]
+----
+auto jobs = result.get<int>("--jobs");
+bool verbose = result.get<bool>("--verbose");
+----
+
+==== `get_optional<T>`
+
+[source,cpp]
+----
+template <Parseable T>
+[[nodiscard]] auto get_optional(std::string_view name) -> std::optional<T>;
+----
+
+Returns the value wrapped in `std::optional`, or `std::nullopt` if the
+option was not set. Useful for optional options without a `default_value`.
+
+[source,cpp]
+----
+auto out = result.get_optional<std::string>("--output");
+if (out) { /* use *out */ }
+----
+
+==== `has`
+
+[source,cpp]
+----
+[[nodiscard]] auto has(std::string_view name) -> bool;
+----
+
+Returns `true` if the option has a value — either from the command line or
+from a `default_value`. Flags always have a value (defaulting to `false`).
+
+==== `positional`
+
+[source,cpp]
+----
+[[nodiscard]] auto positional() -> std::span<const std::string>;
+----
+
+Returns a span over the positional arguments in the order they appeared.
+
+[source,cpp]
+----
+for (auto const &arg : result.positional()) {
+    std::println("file: {}", arg);
+}
+----
+
+---
+
+=== `cli::ParseError`
+
+[source,cpp]
+----
+struct ParseError {
+    ParseErrorKind kind;
+    std::string    message;
+};
+----
+
+Returned as the error type of `std::expected<ParseResult, ParseError>`.
+
+==== `ParseErrorKind`
+
+[cols="1,3", options="header"]
+|===
+| Enumerator | Meaning
+
+| `UnknownOption`   | A token starting with `-` did not match any registered option.
+| `MissingValue`    | An option requiring a value appeared as the last token.
+| `InvalidValue`    | The value string could not be parsed as the declared type.
+| `MissingRequired` | A required option was absent and had no default.
+|===
+
+==== Inspecting errors
+
+[source,cpp]
+----
+auto result = parser.parse(argc, argv);
+if (!result) {
+    switch (result.error().kind) {
+    case cli::ParseErrorKind::UnknownOption:
+        std::println(stderr, "bad flag: {}", result.error().message);
+        break;
+    default:
+        std::println(stderr, "{}", result.error().message);
+    }
+    return 1;
+}
+----
+
+---
+
+=== `cli::Parseable` concept
+
+[source,cpp]
+----
+template <typename T>
+concept Parseable =
+    std::same_as<T, bool>        ||
+    std::same_as<T, int>         ||
+    std::same_as<T, long>        ||
+    std::same_as<T, float>       ||
+    std::same_as<T, double>      ||
+    std::same_as<T, std::string>;
+----
+
+Constrains the type parameter of `option<T>`. Only the listed types are
+supported as option value types.
+
+== Error handling patterns
+
+=== Exit on error (typical CLI tool)
+
+[source,cpp]
+----
+auto result = parser.parse_or_exit(argc, argv);
+// guaranteed non-error past this point
+----
+
+=== Handle errors explicitly
+
+[source,cpp]
+----
+auto result = parser.parse(argc, argv);
+if (!result) {
+    std::println(stderr, "error: {}", result.error().message);
+    parser.print_help();
+    return 1;
+}
+----
+
+=== Span-based (args from a source other than `main`)
+
+[source,cpp]
+----
+std::vector<std::string> raw = load_args_from_config();
+
+// Build a span<char* const> from the strings.
+std::vector<char *> ptrs;
+for (auto &s : raw) ptrs.push_back(s.data());
+
+auto result = parser.parse(std::span{ptrs});
+----
+
+== Worked example
+
+[source,cpp]
+----
+#include <cli/cli.hpp>
+#include <print>
+
+int main(int argc, char *argv[]) {
+    cli::Parser parser("archive", "Simple archiving tool.");
+
+    parser.option<std::string>("--format").alias("-f")
+          .help("Archive format (tar, zip)")
+          .default_value(std::string{"tar"});
+    parser.option<int>("--level").alias("-l")
+          .help("Compression level (0-9)")
+          .default_value(6);
+    parser.flag("--verbose").alias("-v").help("Show each file as it is added");
+    parser.flag("--dry-run").help("Simulate without writing");
+
+    auto result = parser.parse_or_exit(argc, argv);
+
+    auto format  = result.get<std::string>("--format");
+    auto level   = result.get<int>("--level");
+    bool verbose = result.get<bool>("--verbose");
+    bool dry_run = result.get<bool>("--dry-run");
+
+    if (verbose) {
+        std::println("format={} level={} dry-run={}", format, level, dry_run);
+    }
+
+    for (auto const &file : result.positional()) {
+        std::println("adding: {}", file);
+    }
+}
+----
+
+Invocations:
+
+----
+archive --format=zip --level=9 -v file1.txt file2.txt
+archive -f tar file.txt --dry-run
+archive --                # all remaining args are positional
+----
