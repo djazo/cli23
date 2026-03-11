@@ -11,28 +11,6 @@ project(
     ],
 )
 
-if build_machine.system() == 'darwin'
-  add_project_arguments('-mmacosx-version-min=15.0', language: 'cpp')
-endif
-
-cxx = meson.get_compiler('cpp')
-
-charconv_probe= '''
-#include <charconv>
-#include <string_view>
-int main() {
-double d{};
-std::string_view s = "3.14";
-std::from_chars(s.begin(), s.end(), d);
-return 0;
-}
-'''
-
-if cxx.compiles(charconv_probe, name: 'std::from_chars float')
-  add_project_arguments('-DCLI23_HAS_FROM_CHARS', language: 'cpp')
-endif
-
-
 # Public dependency (header-only) 
 
 cli23_inc = include_directories('include')
