@@ -30,6 +30,7 @@ enum class ParseErrorKind : std::uint8_t {
   MissingValue,
   InvalidValue,
   MissingRequired,
+  MissingSubcommand,
 };
 
 struct ParseError {
@@ -56,6 +57,11 @@ struct ParseError {
   static auto missing_required(std::string_view opt) -> ParseError {
     return {.kind    = ParseErrorKind::MissingRequired,
             .message = std::format("required option '{}' not provided", opt)};
+  }
+
+  static auto missing_subcommand() -> ParseError {
+    return {.kind    = ParseErrorKind::MissingSubcommand,
+            .message = "a subcommand is required"};
   }
 };
 
@@ -110,9 +116,26 @@ public:
     return positional_;
   }
 
+  [[nodiscard]] auto subcommand_name() const -> std::optional<std::string_view> {
+    if (subcommand_name_) {
+      return std::string_view{*subcommand_name_};
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] auto subcommand_result() -> ParseResult * {
+    return subcommand_result_.get();
+  }
+
+  [[nodiscard]] auto subcommand_result() const -> const ParseResult * {
+    return subcommand_result_.get();
+  }
+
 private:
   std::unordered_map<std::string, Value> values_;
   std::vector<std::string>               positional_;
+  std::optional<std::string>             subcommand_name_;
+  std::unique_ptr<ParseResult>           subcommand_result_; // heap: ParseResult is incomplete here
 
   friend class Parser;
 };
@@ -157,6 +180,10 @@ public:
   explicit Parser(std::string name, std::string description = "") :
     name_(std::move(name)), description_(std::move(description)) {}
 
+  // Defined out-of-line (below) so that Parser is complete when
+  // unique_ptr<Parser> destructor is instantiated.
+  ~Parser();
+
   // Add a typed option that consumes the next token as its value.
   template <Parseable T>
   auto option(std::string name) -> OptionBuilder<T> {
@@ -166,6 +193,22 @@ public:
     desc.type_name = type_name_for<T>();
     desc.parser    = make_value_parser<T>();
     return {*this, options_.size() - 1};
+  }
+
+  // Register a subcommand. Returns a reference to the sub-parser for
+  // option configuration. The reference stays valid for the lifetime of
+  // this Parser (subparsers_ is a deque — stable on push_back).
+  auto subcommand(std::string name, std::string description = "") -> Parser & {
+    subparsers_.push_back(
+      std::make_unique<Parser>(std::move(name), std::move(description)));
+    return *subparsers_.back();
+  }
+
+  // Mark a subcommand as required. parse() returns MissingSubcommand if no
+  // subcommand token is found.
+  auto required_subcommand() -> Parser & {
+    subcommand_required_ = true;
+    return *this;
   }
 
   // Add a boolean flag that takes no value (present → true).
@@ -201,6 +244,16 @@ public:
 
       // Positional: anything after "--", bare "-", or non-flag token.
       if (past_separator || arg == "-" || !arg.starts_with('-')) {
+        // Before collecting as positional, check if it is a subcommand name.
+        if (!past_separator) {
+          if (Parser *sub = find_subcommand(arg)) {
+            auto sub_res = sub->parse(args.subspan(i + 1));
+            if (!sub_res) return std::unexpected(sub_res.error());
+            result.subcommand_name_   = std::string{arg};
+            result.subcommand_result_ = std::make_unique<ParseResult>(std::move(*sub_res));
+            break;
+          }
+        }
         result.positional_.emplace_back(arg);
         continue;
       }
@@ -253,6 +306,11 @@ public:
       }
     }
 
+    // Validate required subcommand.
+    if (subcommand_required_ && !result.subcommand_name_) {
+      return std::unexpected(ParseError::missing_subcommand());
+    }
+
     return result;
   }
 
@@ -275,9 +333,26 @@ public:
   }
 
   void print_help() const {
-    std::println("Usage: {} [options]", name_);
+    if (!subparsers_.empty()) {
+      std::println("Usage: {} [options] <subcommand> [subcommand options]", name_);
+    } else {
+      std::println("Usage: {} [options]", name_);
+    }
     if (!description_.empty()) {
       std::println("\n{}", description_);
+    }
+    if (!subparsers_.empty()) {
+      std::println("\nSubcommands:");
+      constexpr std::size_t col = 30;
+      for (const auto &sub : subparsers_) {
+        std::string lhs = "  " + sub->name_;
+        if (lhs.size() < col) {
+          lhs.append(col - lhs.size(), ' ');
+        } else {
+          lhs += "\n" + std::string(col, ' ');
+        }
+        std::println("{}{}", lhs, sub->description_);
+      }
     }
     std::println("\nOptions:");
 
@@ -315,10 +390,19 @@ public:
 private:
   std::string            name_;
   std::string            description_;
-  std::deque<OptionDesc> options_; // deque gives stable references
+  std::deque<OptionDesc>                options_;    // deque: stable references
+  std::vector<std::unique_ptr<Parser>> subparsers_; // heap: Parser is incomplete here
+  bool                                 subcommand_required_ = false;
 
   template <Parseable T>
   friend class OptionBuilder;
+
+  [[nodiscard]] auto find_subcommand(std::string_view name) -> Parser * {
+    for (const auto &sub : subparsers_) {
+      if (sub->name_ == name) return sub.get();
+    }
+    return nullptr;
+  }
 
   [[nodiscard]] auto find_option(std::string_view key) -> const OptionDesc * {
     for (const auto &opt : options_) {
@@ -416,6 +500,9 @@ private:
       vpar);
   }
 };
+
+// Parser destructor defined here so unique_ptr<Parser> can see a complete type.
+inline Parser::~Parser() = default;
 
 // ---- OptionBuilder method bodies (need Parser definition) -------------------
 

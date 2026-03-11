@@ -164,4 +164,82 @@ auto main() -> int {
     parser.print_help();
     expect(true);
   };
+
+  // ---- subcommand tests -------------------------------------------------------
+
+  "subcommand basic dispatch"_test = [&] -> void {
+    cli::Parser parser("app", "Test app");
+    parser.flag("--verbose").alias("-v");
+    auto &commit = parser.subcommand("commit", "Record changes");
+    commit.option<std::string>("--message").alias("-m").required();
+    commit.flag("--amend");
+
+    auto argv = make_argv("app", "--verbose", "commit", "--message", "init");
+    auto ret  = parser.parse(static_cast<int>(argv.size()),
+                             const_cast<char **>(argv.data()));
+
+    expect(ret.has_value());
+    expect(ret->get<bool>("--verbose"));
+    expect(ret->subcommand_name() == std::optional<std::string_view>{"commit"});
+    auto *sub = ret->subcommand_result();
+    expect(sub != nullptr);
+    expect(sub->get<std::string>("--message") == "init");
+    expect(!sub->get<bool>("--amend"));
+  };
+
+  "subcommand own options independent of global"_test = [&] -> void {
+    cli::Parser parser("app");
+    auto &push = parser.subcommand("push", "Upload refs");
+    push.option<std::string>("--remote").default_value(std::string{"origin"});
+    push.flag("--force");
+
+    auto argv = make_argv("app", "push", "--force");
+    auto ret  = parser.parse(static_cast<int>(argv.size()),
+                             const_cast<char **>(argv.data()));
+
+    expect(ret.has_value());
+    expect(!ret->subcommand_name().has_value() == false);
+    auto *sub = ret->subcommand_result();
+    expect(sub != nullptr);
+    expect(sub->get<bool>("--force"));
+    expect(sub->get<std::string>("--remote") == "origin");
+  };
+
+  "subcommand required missing"_test = [&] -> void {
+    cli::Parser parser("app");
+    parser.subcommand("commit", "Record changes");
+    parser.required_subcommand();
+
+    auto argv = make_argv("app", "--");
+    auto ret  = parser.parse(static_cast<int>(argv.size()),
+                             const_cast<char **>(argv.data()));
+
+    expect(!ret.has_value());
+    expect(ret.error().kind == cli::ParseErrorKind::MissingSubcommand);
+  };
+
+  "no subcommand token leaves result empty"_test = [&] -> void {
+    cli::Parser parser("app");
+    parser.subcommand("run", "Run something");
+
+    auto argv = make_argv("app", "positional-only");
+    auto ret  = parser.parse(static_cast<int>(argv.size()),
+                             const_cast<char **>(argv.data()));
+
+    expect(ret.has_value());
+    expect(!ret->subcommand_name().has_value());
+    expect(ret->subcommand_result() == nullptr);
+    expect(ret->positional().size() == 1_ul);
+  };
+
+  "subcommand with print_help smoke test"_test = [&] -> void {
+    cli::Parser parser("git", "Fake git.");
+    auto &commit = parser.subcommand("commit", "Record changes");
+    commit.option<std::string>("--message").alias("-m").help("Commit message").required();
+    auto &push = parser.subcommand("push", "Upload refs");
+    push.flag("--force").help("Force push");
+
+    parser.print_help();
+    expect(true);
+  };
 }

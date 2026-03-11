@@ -66,17 +66,16 @@ cli23_dep = declare_dependency(
 |===
 | Feature used | GCC | Clang
 
-| `std::expected`      | 12  | 16
-| `std::print`         | 14  | 18 (libc++ 18)
-| `std::from_chars`    | 11  | 14
-| `std::span`          | 10  | 10
-| Concepts             | 10  | 10
+| `std::expected`  | 12  | 16
+| `std::print`     | 14  | 18 (libc++ 18)
+| `std::span`      | 10  | 10
+| Concepts         | 10  | 10
 |===
 
 Compile with `-std=c++23`.
 
-NOTE: `std::from_chars` for floating-point types requires macOS 26+ SDK.
-On earlier Apple SDKs the library falls back to `std::stod`.
+Numeric values are parsed with `std::stoi`, `std::stol`, `std::stof`, and
+`std::stod` — no platform-specific availability constraints.
 
 == Argument syntax
 
@@ -102,6 +101,100 @@ option tokens freely:
 my-app input.txt --verbose output.txt
 # positional: ["input.txt", "output.txt"]
 ----
+
+== Subcommands
+
+Subcommands allow a single binary to expose multiple named operations
+(e.g. `git commit`, `git push`). Global options are parsed before the
+subcommand token; options after it belong to the subcommand.
+
+=== Registration
+
+[source,cpp]
+----
+cli::Parser parser("git", "Fake git.");
+parser.flag("--verbose").alias("-v");
+
+auto &commit = parser.subcommand("commit", "Record changes");
+commit.option<std::string>("--message").alias("-m").help("Message").required();
+commit.flag("--amend");
+
+auto &push = parser.subcommand("push", "Upload refs");
+push.flag("--force").alias("-f").help("Force push");
+
+// Make the subcommand mandatory (returns MissingSubcommand if absent):
+parser.required_subcommand();
+----
+
+`subcommand()` returns a `Parser&` — configure it exactly like the root
+parser. Subcommands can themselves have further subcommands.
+
+=== Parsing and result access
+
+[source,cpp]
+----
+auto result = parser.parse_or_exit(argc, argv);
+
+// Which subcommand was given?
+auto name = result.subcommand_name(); // std::optional<std::string_view>
+
+// Access the subcommand's own options via a raw pointer (null when absent):
+if (const ParseResult *sub = result.subcommand_result()) {
+    auto msg = sub->get<std::string>("--message");
+}
+----
+
+Tokens are dispatched strictly:
+
+----
+git --verbose commit --message "init"
+    ^^^^^^^^^ global   ^^^^^^^^^^^^^^^^^^ subcommand scope
+----
+
+Everything after the subcommand token is parsed by the subcommand's parser.
+Positional arguments collected before the subcommand token stay in the
+top-level `ParseResult`.
+
+=== `Parser::subcommand`
+
+[source,cpp]
+----
+auto subcommand(std::string name, std::string description = "") -> Parser &;
+----
+
+Registers a subcommand and returns a reference to its `Parser` for option
+configuration. The reference is stable for the lifetime of the root parser.
+
+=== `Parser::required_subcommand`
+
+[source,cpp]
+----
+auto required_subcommand() -> Parser &;
+----
+
+Marks a subcommand as required. `parse` returns `MissingSubcommand` if no
+registered subcommand name is encountered.
+
+=== `ParseResult::subcommand_name`
+
+[source,cpp]
+----
+[[nodiscard]] auto subcommand_name() const -> std::optional<std::string_view>;
+----
+
+Returns the name of the matched subcommand, or `std::nullopt` if none was
+given.
+
+=== `ParseResult::subcommand_result`
+
+[source,cpp]
+----
+[[nodiscard]] auto subcommand_result()       -> ParseResult *;
+[[nodiscard]] auto subcommand_result() const -> const ParseResult *;
+----
+
+Returns a pointer to the subcommand's `ParseResult`, or `nullptr` if no
+subcommand was matched. Access subcommand options through this pointer.
 
 == API reference
 
@@ -360,10 +453,11 @@ Returned as the error type of `std::expected<ParseResult, ParseError>`.
 |===
 | Enumerator | Meaning
 
-| `UnknownOption`   | A token starting with `-` did not match any registered option.
-| `MissingValue`    | An option requiring a value appeared as the last token.
-| `InvalidValue`    | The value string could not be parsed as the declared type.
-| `MissingRequired` | A required option was absent and had no default.
+| `UnknownOption`     | A token starting with `-` did not match any registered option.
+| `MissingValue`      | An option requiring a value appeared as the last token.
+| `InvalidValue`      | The value string could not be parsed as the declared type.
+| `MissingRequired`   | A required option was absent and had no default.
+| `MissingSubcommand` | `required_subcommand()` was set but no subcommand token was found.
 |===
 
 ==== Inspecting errors
